@@ -25,7 +25,7 @@
 import { randomBytes, scryptSync } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { MAX_TAGS, WRITE_GAP } from './constants.js';
+import { MAX_TAGS, TICK, WRITE_GAP } from './constants.js';
 import { featureKeys } from './fields.js';
 
 /** A storage in memory (tests, and the fallback). */
@@ -126,7 +126,10 @@ export class GatewayStore {
     now = Date.now,
     timers = { setTimeout, clearTimeout },
     maxPause,
+    nextReadAt = () => Infinity,
   }) {
+    /** When the next periodic read is due (it writes the whole entry). */
+    this.nextReadAt = nextReadAt;
     this.storage = storage;
     this.now = now;
     this.timers = timers;
@@ -233,8 +236,8 @@ export class GatewayStore {
     return this.writtenAt + WRITE_GAP;
   }
 
-  canWrite() {
-    return this.now() >= this.writableAt();
+  canWrite(now = this.now()) {
+    return now >= this.writableAt();
   }
 
   markDirty() {
@@ -246,7 +249,16 @@ export class GatewayStore {
     if (this.flushTimer !== undefined) {
       return;
     }
-    const delay = Math.max(0, this.writableAt() - this.now());
+    // A deferred write never takes the slot of a read due before the end of
+    // its own gap: it would be armed for the very instant of the next tick
+    // and, firing first, push the read one gap later (a read every other
+    // interval at 1 minute). It waits until just after that read, which
+    // writes the whole entry anyway (and drops this timer).
+    const now = this.now();
+    const at = this.writableAt();
+    const next = this.nextReadAt();
+    const target = next <= at + WRITE_GAP ? Math.max(at, next) + TICK + 1_000 : at;
+    const delay = Math.max(0, target - now);
     this.flushTimer = this.timers.setTimeout(() => {
       this.flushTimer = undefined;
       this.flush();

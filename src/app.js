@@ -83,7 +83,13 @@ export class RuuviGatewayApp {
     // The pace, the pauses and the refusal live as long as the process,
     // across restarts of the app and reconnections to Gladys, and in /data
     // across restarts of the container.
-    this.store = new GatewayStore({ storage, now, timers, maxPause: BUSY_MAX });
+    this.store = new GatewayStore({
+      storage,
+      now,
+      timers,
+      maxPause: BUSY_MAX,
+      nextReadAt: () => (this.secret ? this.earliest() : Infinity),
+    });
     /** `address\nkey` when the gateway is configured, else ''. */
     this.secret = '';
     /** The error of the gateway (refused, busy, failed...), or undefined. */
@@ -157,6 +163,7 @@ export class RuuviGatewayApp {
       () => this.tick().catch((err) => this.logger.warn(`Refresh failed: ${this.scrub(err)}`)),
       TICK,
     );
+    this.armDue();
     await this.publishDiscovered();
     await this.refreshStatus();
   }
@@ -169,6 +176,8 @@ export class RuuviGatewayApp {
     }
     this.timers.clearTimeout(this.flushTimer);
     this.flushTimer = undefined;
+    this.timers.clearTimeout(this.dueTimer);
+    this.dueTimer = undefined;
     // The states still waiting stay, with the instant of their measurement:
     // flushStates() judges them again when they leave (dropped past an
     // hour, dated past recentMs()), however long the stop lasted.
@@ -236,6 +245,31 @@ export class RuuviGatewayApp {
 
   // --- Reading -----------------------------------------------------------------------
 
+  /**
+   * A timer for the very instant the next read is allowed (1 ms after it),
+   * besides the ticks: a read every interval exactly, never one tick later
+   * because the tick fell a few milliseconds before the end of the interval.
+   */
+  armDue() {
+    this.timers.clearTimeout(this.dueTimer);
+    this.dueTimer = undefined;
+    if (!this.secret) {
+      return;
+    }
+    const now = this.now();
+    const at = Math.max(this.earliest(), this.store.writableAt());
+    if (!Number.isFinite(at)) {
+      return;
+    }
+    this.dueTimer = this.timers.setTimeout(
+      () => {
+        this.dueTimer = undefined;
+        this.tick().catch((err) => this.logger.warn(`Refresh failed: ${this.scrub(err)}`));
+      },
+      Math.max(0, at - now) + 1,
+    );
+  }
+
   /** Read what is due (a tick never overlaps another). */
   tick({ manual = false } = {}) {
     if (!manual && this.ticking && this.tickGeneration === this.generation) {
@@ -245,6 +279,9 @@ export class RuuviGatewayApp {
     const run = this.exclusive(() => this.readDue({ manual })).finally(() => {
       if (this.ticking === run) {
         this.ticking = undefined;
+      }
+      if (generation === this.generation && this.interval !== undefined) {
+        this.armDue();
       }
     });
     if (!manual) {
@@ -264,7 +301,7 @@ export class RuuviGatewayApp {
   async readDue({ manual = false } = {}) {
     const generation = this.generation;
     const now = this.now();
-    if (!this.secret || now < this.earliest({ manual }) || !this.store.canWrite()) {
+    if (!this.secret || now < this.earliest({ manual }) || !this.store.canWrite(now)) {
       return;
     }
     this.store.update({ lastAttemptAt: now }, undefined, { defer: true });
