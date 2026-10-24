@@ -31,7 +31,8 @@ Gladys ⇄ SDK ⇄ src/app.js (RuuviGatewayApp)  what is due, pauses, refusal, t
   URL formats are counted, not decoded.
 - **Measurements**: told apart by their sequence number (else the instant
   heard, else the frame), kept under `/data`, handed to Gladys once; the age
-  counted on the clock of the gateway; current if at most max(5 min,
+  counted on the clock of the gateway (without its
+  instants, a measurement seen first gives no value); current if at most max(5 min,
   interval + 2 min) old, dated (`created_at`) up to 1 hour, never older; the
   signal only with a new measurement. A tag whose sequence stops is never
   shown alive. Motion: the movement counter moved since the previous

@@ -131,6 +131,7 @@ test('the license and the notices ship with the image', () => {
   assert.match(notices, /https:\/\/github\.com\/ruuvi\/docs/);
   assert.match(notices, /data-format-5-rawv2/);
   assert.match(notices, /polling-mode/);
+  assert.match(notices, /ttu\/ruuvitag-sensor\) \(MIT/);
   const dockerfile = read('Dockerfile');
   assert.match(dockerfile, /COPY .*LICENSE/);
   assert.match(dockerfile, /COPY .*THIRD_PARTY_NOTICES\.md/);

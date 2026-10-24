@@ -340,7 +340,12 @@ test('the frames not decoded are counted in the status; a MAC that does not matc
             [CAVE]: { data: rawV2({ mac: 'AA:BB:CC:DD:EE:FF' }) },
           },
           extra: {
-            'AA:BB:CC:00:00:01': { rssi: -50, timestamp: '1', data: '0201061AFF4C000215' },
+            // A complete beacon of another brand (Apple): ignored, not counted.
+            'AA:BB:CC:00:00:01': {
+              rssi: -50,
+              timestamp: '1',
+              data: `0201061AFF4C000215${'00'.repeat(21)}`,
+            },
           },
         }),
       ),
@@ -569,4 +574,164 @@ test('not configured, invalid address, invalid key: said at once, nothing sent',
     assert.equal(reads(), 0);
     fake.restore();
   }
+});
+
+test('states waiting during a long disconnection: dropped past an hour, dated past recentMs', async () => {
+  for (const [gap, expected] of [
+    [3 * 60 * 60_000, 'none'],
+    [10 * 60_000, 'dated'],
+  ]) {
+    const ctx = await setup();
+    await ctx.app.start(CONFIG);
+    await createAll(ctx.gladys);
+    // Gladys restarts while a read publishes: the states go back to the queue.
+    const original = ctx.gladys.publishChangedStates.bind(ctx.gladys);
+    ctx.gladys.publishChangedStates = async () => {
+      throw new Error('Gladys is restarting');
+    };
+    ctx.clock.now += 2 * 60_000;
+    await ctx.timers.runIntervals();
+    assert.ok(ctx.app.backlog.size > 0, 'states wait');
+    ctx.app.stop();
+    // The gateway falls silent; Gladys comes back `gap` later.
+    ctx.state.answer = () => json({}, 503);
+    ctx.gladys.publishChangedStates = original;
+    const batches = spyStates(ctx.gladys);
+    ctx.clock.now += gap;
+    await ctx.app.start(CONFIG);
+    const sent = batches.flat();
+    if (expected === 'none') {
+      assert.equal(sent.length, 0, 'nothing older than an hour reaches Gladys');
+    } else {
+      assert.ok(sent.length > 0);
+      assert.ok(
+        sent.every((s) => s.created_at === new Date(NOW + 2 * 60_000 - 2_000).toISOString()),
+        'sent dated at the instant of the measurement, never as current',
+      );
+    }
+    fake.restore();
+  }
+});
+
+/** An answer of a gateway without timestamps (a `counter` per tag). */
+const noTimestamps = (sequence, { heard = 1 } = {}) =>
+  json({
+    data: {
+      coordinates: '',
+      nonce: '2896361039',
+      gw_mac: 'C8:25:2D:8E:9C:2C',
+      tags: {
+        [SALON]: { rssi: -50, counter: String(heard), data: rawV2({ mac: SALON, sequence }) },
+      },
+    },
+  });
+
+test('a gateway without timestamps: a frame seen first gives nothing; a new measurement does', async () => {
+  let sequence = 7;
+  const ctx = await setup({ answer: () => noTimestamps(sequence) });
+  await ctx.app.start(CONFIG);
+  const batches = spyStates(ctx.gladys);
+  await createAll(ctx.gladys);
+  assert.equal(batches.flat().length, 0, 'maybe the last frame of a tag silent for days');
+  assert.match(
+    ctx.gladys.fake.connectionStatus.message.en,
+    /Ruuvi AD06 \(waiting for a new measurement/,
+  );
+  assert.match(
+    (await ctx.app.testConnection()).fr,
+    /Ruuvi AD06 : en attente d'une nouvelle mesure/,
+  );
+  // The same frame read again: still nothing.
+  ctx.clock.now += 2 * 60_000;
+  await ctx.timers.runIntervals();
+  assert.equal(batches.flat().length, 0);
+  // The sequence moves: a measurement made since the previous read.
+  sequence = 8;
+  ctx.clock.now += 2 * 60_000;
+  await ctx.timers.runIntervals();
+  const sent = batches.flat();
+  assert.ok(sent.some((s) => s.device_feature_external_id === `${SALON_ID}:temperature`));
+  assert.ok(
+    sent.every((s) => s.created_at === undefined),
+    'at most one interval old: current',
+  );
+});
+
+test('a gateway whose clock is not set (1970): its instants are not trusted', async () => {
+  let sequence = 7;
+  const ctx = await setup({
+    answer: () =>
+      json(
+        history(5 * 60_000, {
+          tags: { [SALON]: { sequence }, [CAVE]: { absent: true } },
+        }),
+      ),
+  });
+  await ctx.app.start(CONFIG);
+  const batches = spyStates(ctx.gladys);
+  await createAll(ctx.gladys);
+  assert.equal(batches.flat().length, 0);
+  sequence = 8;
+  ctx.clock.now += 2 * 60_000;
+  await ctx.timers.runIntervals();
+  assert.ok(batches.flat().length > 0);
+});
+
+test('the places go to the tags created first, even after the state file was lost', async () => {
+  const macs = Array.from(
+    { length: 55 },
+    (_, i) => `D0:00:00:00:00:${i.toString(16).padStart(2, '0').toUpperCase()}`,
+  );
+  const created = macs[54];
+  const answer = () => {
+    const tags = {};
+    for (const [i, mac] of macs.entries()) {
+      tags[mac] = {
+        rssi: -70,
+        timestamp: String(Math.floor(ctx.clock.now / 1000) - 1),
+        data: rawV2({ mac, sequence: 1000 + i + Math.floor(ctx.clock.now / 60_000) }),
+      };
+    }
+    return json({ data: { timestamp: String(Math.floor(ctx.clock.now / 1000)), tags } });
+  };
+  const first = await setup({ answer });
+  const ctx = first;
+  await ctx.app.start(CONFIG);
+  const createdId = `ext:ruuvi-gateway:tag:${created.replaceAll(':', '').toLowerCase()}`;
+  assert.ok(!ctx.gladys.fake.discoveredDevices.some((d) => d.external_id === createdId));
+  // The 55th tag was created in Gladys before (a lost state file): it takes
+  // a place at the next read, from a tag not created.
+  const device = {
+    name: 'Created',
+    external_id: createdId,
+    should_poll: false,
+    features: [
+      {
+        name: 'Temperature',
+        external_id: `${createdId}:temperature`,
+        category: 'temperature-sensor',
+        type: 'decimal',
+        unit: 'celsius',
+        min: -60,
+        max: 100,
+        read_only: true,
+        has_feedback: false,
+        keep_history: true,
+      },
+    ],
+  };
+  await ctx.gladys.fake.deviceCreated(device);
+  ctx.clock.now += 2 * 60_000;
+  await ctx.timers.runIntervals();
+  assert.ok(ctx.gladys.fake.discoveredDevices.some((d) => d.external_id === createdId));
+  assert.equal(ctx.gladys.fake.discoveredDevices.length, 50);
+  assert.equal(typeof ctx.gladys.fake.lastState(`${createdId}:temperature`), 'number');
+});
+
+test('a refused key: the status says the reads are stopped', async () => {
+  const ctx = await setup({ answer: () => json({}, 401) });
+  await ctx.app.start(CONFIG);
+  assert.match(ctx.gladys.fake.connectionStatus.message.en, /reads stopped/);
+  assert.match(ctx.gladys.fake.connectionStatus.message.fr, /lectures arrêtées/);
+  assert.doesNotMatch(ctx.gladys.fake.connectionStatus.message.en, /read every/);
 });

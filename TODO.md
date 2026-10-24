@@ -69,8 +69,18 @@
 - **Freshness**: a measurement is told apart by its sequence number (RAWv2,
   C5), else by the instant the gateway heard it (RAWv1), else by the frame
   itself; the same mark never makes a tag look alive. Its age is counted on
-  the clock of the gateway; without its instants, from the first sight by
-  the integration.
+  the clock of the gateway. Without its instants (no timestamps, or a clock
+  before 2020: the firmware then returns its whole table, review r1), a mark
+  seen first gives no value; only a mark that changed since the previous
+  read of the process is published, as measured since that read.
+- **Waiting states** keep the instant of their measurement and are judged
+  when they leave: dropped past an hour, dated past `recentMs()` (review r1).
+- **RAWv1 "not available"**: humidity 0, raw pressure 0 and voltage 0 are
+  unknown; a temperature of 0 only when the whole frame is 0 (review r1).
+- **Frame lengths**: the exact length of each format (24, 18, 14 bytes);
+  a cut AD structure counts as `frame` (review r1).
+- **Places** (50 tags): created tags first, then known, then new; a created
+  tag takes the place of the non-created tag heard the longest ago.
 - **Motion**: binary, 1 when the movement counter differs from the one of
   the previous measurement (at most an hour before, in memory only), 0
   otherwise; no value for a first measurement. A motion sensor never acts

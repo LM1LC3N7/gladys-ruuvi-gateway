@@ -38,3 +38,8 @@ the notes of the version's GitHub Release.
   `/data`, in the logs nor in a status.
 - A test button that shows the last values of each tag and when the next
   read can happen.
+- A gateway without timestamps, or whose clock is not set, never makes an old
+  frame look like a current measurement: a tag gets values once its
+  measurement changes between two reads.
+- A value that waited (full budget, Gladys unreachable) is dated, or dropped
+  past an hour, when it is finally sent.

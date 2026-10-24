@@ -11,7 +11,8 @@
 //
 //   0x05 RAWv2 (RuuviTag, in production): 24 bytes
 //   0xC5 Cut-RAWv2 (RuuviTag, beta): RAWv2 without the acceleration, 18 bytes
-//   0x03 RAWv1 (RuuviTag, deprecated): 14 bytes, no sequence number
+//   0x03 RAWv1 (RuuviTag, deprecated): 14 bytes, no sequence number, 0 for
+//        "not available" (see decodeRawV1)
 //
 // Any other format (6 and E1 of Ruuvi Air, 8 encrypted, 4 URL...) is told
 // apart and left out. Every field is checked: the "not available" values of
@@ -39,16 +40,20 @@ export function hexToBytes(hex) {
 }
 
 /**
- * The Ruuvi manufacturer data of an advertisement (without the company id),
- * or null. The AD structures are walked once; a length that runs past the
- * end stops the walk (a cut frame is never read past its end).
+ * The Ruuvi manufacturer data of an advertisement (without the company id):
+ * `{ payload }`, `{ truncated: true }` when an AD structure runs past the end
+ * of the frame (a cut frame, never read past its end), or null when there is
+ * no Ruuvi data (a length of 0 ends the significant part, as in Bluetooth).
  */
 export function ruuviPayload(bytes) {
   let i = 0;
   while (i < bytes.length) {
     const length = bytes[i];
-    if (length === 0 || i + 1 + length > bytes.length) {
+    if (length === 0) {
       return null;
+    }
+    if (i + 1 + length > bytes.length) {
+      return { truncated: true };
     }
     const type = bytes[i + 1];
     if (
@@ -57,7 +62,7 @@ export function ruuviPayload(bytes) {
       bytes[i + 2] === RUUVI_ID[0] &&
       bytes[i + 3] === RUUVI_ID[1]
     ) {
-      return bytes.subarray(i + 4, i + 1 + length);
+      return { payload: bytes.subarray(i + 4, i + 1 + length) };
     }
     i += 1 + length;
   }
@@ -143,23 +148,31 @@ function decodeCutRawV2(p) {
 
 /**
  * RAWv1: the temperature is a sign bit, 7 bits of whole degrees and a byte
- * of hundredths (0 to 99); the format has no "not available" value, so a
- * fraction above 99 is the only field refused.
+ * of hundredths (0 to 99). The format page gives no specific "not
+ * available" value and suggests sending 0: a humidity of 0, a raw pressure
+ * of 0 (50 000 Pa) and a voltage of 0 are taken as not available; a
+ * temperature of 0 °C is plausible and kept, unless every field of the
+ * frame is 0. A fraction above 99 is refused too.
  */
 function decodeRawV1(p) {
   const fraction = u8(p, 3);
   const whole = u8(p, 2) & 0x7f;
   const negative = (u8(p, 2) & 0x80) !== 0;
-  const temperature = fraction > 99 ? null : (negative ? -1 : 1) * (whole + fraction / 100);
+  const allZero = p.subarray(1, 14).every((b) => b === 0);
+  const temperature =
+    fraction > 99 || allZero ? null : (negative ? -1 : 1) * (whole + fraction / 100);
+  const humidity = u8(p, 1);
+  const pressure = u16(p, 4);
+  const voltage = u16(p, 12);
   return {
     format: 3,
     temperature: temperature === null ? null : round(temperature, 2),
-    humidity: u8(p, 1) * 0.5,
-    pressure: u16(p, 4) + 50_000,
+    humidity: humidity === 0 ? null : humidity * 0.5,
+    pressure: pressure === 0 ? null : pressure + 50_000,
     accelerationX: i16(p, 6) / 1000,
     accelerationY: i16(p, 8) / 1000,
     accelerationZ: i16(p, 10) / 1000,
-    voltage: u16(p, 12) / 1000,
+    voltage: voltage === 0 ? null : voltage / 1000,
     txPower: null,
     movement: null,
     sequence: null,
@@ -167,7 +180,7 @@ function decodeRawV1(p) {
   };
 }
 
-/** [format byte, minimum payload length, decoder]. */
+/** [format byte, exact payload length, decoder]. */
 const FORMATS = [
   [0x05, 24, decodeRawV2],
   [0xc5, 18, decodeCutRawV2],
@@ -176,16 +189,21 @@ const FORMATS = [
 
 /**
  * A relayed advertisement (hex) -> { ok: true, measure } or { ok: false,
- * why }: `why` is `frame` (not a valid hex frame), `other` (no Ruuvi data),
- * `short` (a Ruuvi payload too short for its format) or `format:<n>` (a
- * format this integration does not decode, such as 6, 225 = E1 or 8).
+ * why }: `why` is `frame` (not a valid hex frame, or an AD structure cut
+ * short), `other` (no Ruuvi data), `short` / `long` (a Ruuvi payload not of
+ * the exact length of its format) or `format:<n>` (a format this
+ * integration does not decode, such as 6, 225 = E1 or 8).
  */
 export function decodeFrame(hex) {
   const bytes = hexToBytes(hex);
   if (!bytes) {
     return { ok: false, why: 'frame' };
   }
-  const payload = ruuviPayload(bytes);
+  const found = ruuviPayload(bytes);
+  if (found?.truncated) {
+    return { ok: false, why: 'frame' };
+  }
+  const payload = found?.payload;
   if (!payload || payload.length === 0) {
     return { ok: false, why: 'other' };
   }
@@ -193,8 +211,8 @@ export function decodeFrame(hex) {
   if (!format) {
     return { ok: false, why: `format:${payload[0]}` };
   }
-  if (payload.length < format[1]) {
-    return { ok: false, why: 'short' };
+  if (payload.length !== format[1]) {
+    return { ok: false, why: payload.length < format[1] ? 'short' : 'long' };
   }
   return { ok: true, measure: format[2](payload) };
 }
@@ -203,5 +221,5 @@ export function decodeFrame(hex) {
 export function decodePayload(hex) {
   const bytes = hexToBytes(hex);
   const format = bytes && FORMATS.find(([id]) => id === bytes[0]);
-  return format && bytes.length >= format[1] ? format[2](bytes) : null;
+  return format && bytes.length === format[1] ? format[2](bytes) : null;
 }

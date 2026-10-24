@@ -50,8 +50,10 @@ caractères de son adresse MAC (comme dans les applications Ruuvi ; renommez-le
   catégories : ces deux valeurs sont sans unité, l'unité n'est écrite que
   dans leur nom.
 - Une valeur que le capteur marque « non disponible » dans sa trame (0x8000,
-  0xFFFF et semblables), ou hors de la plage de la fonction, est laissée de
-  côté, jamais remplacée par une supposition.
+  0xFFFF et semblables en RAWv2 et Cut-RAWv2 ; en RAWv1, qui n'a pas de telle
+  valeur, une humidité, une pression brute ou une tension à 0, et une
+  température à 0 quand toute la trame vaut 0), ou hors de la plage de la
+  fonction, est laissée de côté, jamais remplacée par une supposition.
 - Les noms des fonctions sont en anglais ; renommez-les à la création si vous
   le souhaitez.
 
@@ -113,7 +115,8 @@ balises d'autres marques relayées par la passerelle sont ignorées.
 - **Jamais plus vite que l'intervalle**, compté depuis la dernière lecture :
   ni par le bouton de test, ni par une reconnexion à Gladys, une
   configuration enregistrée, l'onglet Découverte ou un redémarrage du
-  conteneur. Seule une autre adresse ou une autre clé est essayée aussitôt.
+  conteneur. Une autre adresse ou une autre clé est essayée dans la minute environ (le
+  fichier d'état est écrit au plus une fois par minute).
   Avant la fin de l'intervalle, le bouton de test affiche les dernières
   valeurs et l'heure de la prochaine lecture possible.
 - Une passerelle qui ne répond pas est réessayée à l'intervalle suivant.
@@ -123,8 +126,8 @@ balises d'autres marques relayées par la passerelle sont ignorées.
 - Quand la passerelle **refuse la clé** (401 ou 403), ou renvoie vers sa page
   de connexion (une redirection : une clé est nécessaire), les lectures
   s'arrêtent **définitivement** et le statut le dit : aucun nouvel essai de
-  lui-même, même après un redémarrage. Changez l'adresse ou la clé (essayée
-  aussitôt), ou appuyez sur le bouton de test une fois l'intervalle écoulé
+  lui-même, même après un redémarrage. Changez l'adresse ou la clé (essayée dans la minute
+  environ), ou appuyez sur le bouton de test une fois l'intervalle écoulé
   (un essai ; l'arrêt n'est levé que s'il réussit). Enregistrer la
   configuration sans la changer ne lève jamais l'arrêt.
 
@@ -136,16 +139,24 @@ balises d'autres marques relayées par la passerelle sont ignorées.
   plusieurs fois la même mesure : elle est remise à Gladys **une seule
   fois**. La marque de la dernière mesure remise est gardée sous `/data`
   (écrite aussitôt par un arrêt propre) : un redémarrage ne la renvoie pas.
-- Ainsi un capteur qui **cesse de mesurer** n'envoie plus rien, même si la
-  passerelle entend encore sa dernière trame : ni ses mesures ni son signal,
-  envoyés seulement avec une nouvelle mesure. Après une heure sans nouvelle
-  mesure, le statut l'indique « pas de mesure récente ».
+- Ainsi un capteur qui **cesse de mesurer** (RAWv2, Cut-RAWv2 : son numéro de
+  mesure s'arrête) n'envoie plus rien, même si la passerelle entend encore sa
+  dernière trame : ni ses mesures ni son signal, envoyés seulement avec une
+  nouvelle mesure. Après une heure sans nouvelle mesure, le statut l'indique
+  « pas de mesure récente ». Un capteur en RAWv1 n'a pas de numéro de
+  mesure : chaque trame que la passerelle entend de nouveau compte comme une
+  nouvelle mesure.
 - L'âge d'une mesure est compté sur l'**horloge de la passerelle** : de
   l'instant où elle a entendu cette mesure pour la première fois à l'instant
   de sa réponse (deux instants donnés par la passerelle) ; une horloge de
   Gladys décalée ne la fait donc jamais paraître plus vieille ou plus
-  récente. Sans ces instants, l'âge est compté depuis la première fois que
-  l'intégration a vu la mesure.
+  récente. Sans ces instants (passerelle réglée sans
+  horodatage, ou dont l'horloge n'est pas réglée : avant 2020), la passerelle
+  renvoie toutes les trames qu'elle a gardées, anciennes comprises : une
+  mesure vue pour la première fois ne donne alors **aucune valeur** (« en
+  attente d'une nouvelle mesure ») ; seule une mesure qui a changé depuis la
+  lecture précédente de l'intégration est envoyée, comme faite depuis cette
+  lecture.
 - Une nouvelle mesure de 5 minutes au plus (ou l'intervalle + 2 minutes) est
   envoyée comme valeur actuelle ; plus ancienne, jusqu'à une heure, elle est
   envoyée **datée** (Gladys l'enregistre à son heure réelle et aucune scène
@@ -155,13 +166,15 @@ balises d'autres marques relayées par la passerelle sont ignorées.
   passerelle l'a rangée.
 - Au plus **250 valeurs par minute** sont envoyées à Gladys (le cœur en
   accepte 300) : avec beaucoup de capteurs, le reste suit à la minute
-  suivante. Une valeur inchangée n'est pas renvoyée (sauf toutes les 30
-  minutes).
+  suivante. Une valeur qui attend (budget plein, Gladys injoignable) est
+  jugée de nouveau à son départ : datée au-delà de 5 minutes (ou
+  l'intervalle + 2 minutes), écartée au-delà d'une heure. Une valeur
+  inchangée n'est pas renvoyée (sauf toutes les 30 minutes).
 
 ## Ce qui est gardé sous `/data`
 
 L'instant de la dernière lecture, la pause, le refus, l'adresse MAC de la
-passerelle et les capteurs rencontrés (adresse MAC, mesures, marque de la
+passerelle et les capteurs rencontrés (adresse MAC, noms de leurs fonctions, marque de la
 dernière mesure remise à Gladys, dernière fois entendu : rien de secret)
 survivent à une reconnexion et à un redémarrage du conteneur. L'instant d'une
 lecture est écrit avant le départ de sa requête, et le fichier est écrit au
@@ -169,10 +182,11 @@ plus une fois par minute, sauf pour une pause, un refus ou un nouveau capteur
 (écrits aussitôt). La clé n'est jamais écrite : tant qu'elle est refusée, le
 fichier ne garde qu'un repère de 8 bits d'une empreinte salée de l'adresse et
 de la clé (1 clé sur 256 donne le même repère : rien qui permette de
-retrouver la clé), pour qu'après un redémarrage une autre clé soit essayée
-aussitôt.
+retrouver la clé), pour qu'après un redémarrage une autre clé soit essayée sans attendre
+l'intervalle.
 
-Au plus 50 capteurs sont lus ; une réponse de plus de 1 Mo, ou plus lente que
+Au plus 50 capteurs sont lus, ceux créés dans Gladys d'abord, puis ceux
+déjà connus ; une réponse de plus de 1 Mo, ou plus lente que
 10 secondes, est abandonnée. Un capteur ni entendu depuis une semaine ni créé
 dans Gladys (celui d'un voisin, de passage) quitte la liste de Découverte.
 
@@ -196,8 +210,14 @@ passerelle la donne, en 12 caractères hexadécimaux minuscules sans séparateur
 - **« pas de mesure récente »** : le capteur n'a pas envoyé de nouvelle
   mesure depuis une heure (hors de portée, pile vide, filtre de la
   passerelle).
-- **« trame(s) Ruuvi non décodée(s) »** : un Ruuvi Air ou un capteur dans un
-  format que cette intégration ne décode pas.
+- **« en attente d'une nouvelle mesure »** : la passerelle ne donne pas
+  l'heure (réglée sans horodatage, ou horloge non réglée) : un capteur
+  apparaît dès que sa mesure change entre deux lectures. Activez
+  l'horodatage et la synchronisation de l'heure de la passerelle pour avoir
+  les valeurs tout de suite.
+- **« trame(s) Ruuvi non décodée(s) »** : un Ruuvi Air, un capteur dans un
+  format que cette intégration ne décode pas, ou une trame coupée ou de
+  mauvaise longueur.
 - Journaux : le niveau se règle avec la variable `LOG_LEVEL`.
 
 ## Vie privée

@@ -45,8 +45,10 @@ address (as in the Ruuvi apps; rename it when you create it):
 - Gladys has no unit for a voltage nor a signal in dBm in these categories:
   these two are plain values, the unit is only written in their name.
 - A value the tag marks "not available" in its frame (0x8000, 0xFFFF and the
-  like), or outside the range of the feature, is left out, never replaced
-  by a guess.
+  like in RAWv2 and Cut-RAWv2; in RAWv1, which has no such value, a humidity,
+  a raw pressure or a voltage of 0, and a temperature of 0 when the whole
+  frame is 0), or outside the range of the feature, is left out, never
+  replaced by a guess.
 
 ### Data formats
 
@@ -102,8 +104,8 @@ decoded"). Beacons of other brands relayed by the gateway are ignored.
   gateway.
 - **Never faster than the interval**, counted from the last read: not by the
   test button, a reconnection to Gladys, a saved configuration, the
-  Discovery tab nor a restart of the container. Only another address or key
-  is tried at once. Before the interval has passed, the test button shows
+  Discovery tab nor a restart of the container. Another address or key is tried within about a minute (the state file is
+  written at most once a minute). Before the interval has passed, the test button shows
   the last values and the time of the next possible read.
 - A gateway that does not answer is tried again at the next interval.
 - When the gateway answers **429 or a 5xx**, it is left alone for the
@@ -112,7 +114,7 @@ decoded"). Beacons of other brands relayed by the gateway are ignored.
 - When the gateway **refuses the key** (401 or 403), or sends to its sign-in
   page (a redirection: a key is needed), the reads stop **for good** and the
   status says so: no new try on its own, even after a restart. Change the
-  address or the key (tried at once), or press the test button once the
+  address or the key (tried within about a minute), or press the test button once the
   interval has passed (one try; the stop is lifted only if it works).
   Saving the configuration unchanged never lifts the stop.
 
@@ -124,15 +126,21 @@ decoded"). Beacons of other brands relayed by the gateway are ignored.
   same measurement many times: it is handed to Gladys **once**. The mark of
   the last measurement handed over is kept under `/data` (written at once
   by a clean stop), so a restart does not send it again.
-- So a tag that **stops measuring** sends nothing, even if the gateway still
-  hears its last frame: neither its measures nor its signal, which are only
-  sent with a new measurement. After an hour without a new measurement, the
-  status lists it as "no recent measurement".
+- So a tag that **stops measuring** (RAWv2, Cut-RAWv2: its measurement
+  number stops) sends nothing, even if the gateway still hears its last
+  frame: neither its measures nor its signal, which are only sent with a new
+  measurement. After an hour without a new measurement, the status lists it
+  as "no recent measurement". A RAWv1 tag has no measurement number: each
+  frame the gateway hears anew counts as a new measurement.
 - The age of a measurement is counted on the **clock of the gateway**: from
   the instant it first heard that measurement to the instant of its answer
   (both given by the gateway), so a Gladys clock that is off never makes it
-  look older or newer. Without these instants, the age is counted from the
-  first time the integration saw the measurement.
+  look older or newer. Without these instants (a gateway set without timestamps, or whose
+  clock is not set: before 2020), the gateway returns every frame it ever
+  kept, old ones included: a measurement seen for the first time then gives
+  **no value** ("waiting for a new measurement"); only a measurement that
+  changed since the previous read of the integration is sent, as made since
+  that read.
 - A new measurement at most 5 minutes old (or the interval + 2 minutes) is
   sent as the current value; older, up to one hour, it is sent **dated**
   (Gladys records it at its real time and no scene fires); older than one
@@ -140,23 +148,27 @@ decoded"). Beacons of other brands relayed by the gateway are ignored.
   is ignored, as is a frame whose MAC address is not the one the gateway
   filed it under.
 - At most **250 values per minute** are sent to Gladys (the core accepts
-  300): with many tags, the rest follows in the next minute. Unchanged
+  300): with many tags, the rest follows in the next minute. A value that
+  waits (full budget, Gladys unreachable) is judged again when it leaves:
+  dated past 5 minutes (or the interval + 2 minutes), dropped past an
+  hour. Unchanged
   values are not sent again (but every 30 minutes).
 
 ## What is kept under `/data`
 
 The instant of the last read, the pause, the refusal, the MAC address of the
-gateway and the tags met (MAC address, measures, mark of the last
-measurement handed to Gladys, last time heard: nothing secret) survive a
+gateway and the tags met (MAC address, names of their features, mark of the last measurement
+handed to Gladys, last time heard: nothing secret) survive a
 reconnection and a restart of the container. The instant of a read is
 written before its request leaves, and the file is written at most once per
 minute but for a pause, a refusal or a new tag (written at once). The key is
 never written: while it is refused, the file keeps only an 8-bit marker of
 a salted hash of the address and key (1 key in 256 gives the same marker:
-nothing that could find the key back), so that after a restart another key
-is tried at once.
+nothing that could find the key back), so that after a restart another key is tried without waiting for the
+interval.
 
-At most 50 tags are read; an answer larger than 1 MB, or slower than 10
+At most 50 tags are read, the tags created in Gladys first, then the tags
+already known; an answer larger than 1 MB, or slower than 10
 seconds, is abandoned. A tag neither heard for a week nor created in Gladys
 (a neighbour's tag that passed by) leaves the Discovery list.
 
@@ -178,8 +190,12 @@ gives it, in 12 lowercase hexadecimal digits without separators
   (update it from its configuration pages).
 - **"no recent measurement"**: the tag has not sent a new measurement for an
   hour (out of range, empty battery, gateway filter).
-- **"Ruuvi frame(s) not decoded"**: a Ruuvi Air or a tag in a format this
-  integration does not decode.
+- **"waiting for a new measurement"**: the gateway gives no time (set
+  without timestamps, or its clock is not set): a tag is shown once its
+  measurement changes between two reads. Turn on the timestamps and the time
+  synchronisation of the gateway to get values at once.
+- **"Ruuvi frame(s) not decoded"**: a Ruuvi Air, a tag in a format this
+  integration does not decode, or a frame cut short or of the wrong length.
 - Logs: the level is set with the `LOG_LEVEL` variable.
 
 ## Privacy

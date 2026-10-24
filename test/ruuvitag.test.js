@@ -118,10 +118,19 @@ test('data format 3 (RAWv1): the vectors of the docs', () => {
   assert.equal(max.pressure, 115535);
   assert.equal(max.humidity, 127.5);
   assert.equal(max.voltage, 65.535);
+  // The minimum vector: humidity 0, raw pressure 0 and voltage 0 are the
+  // "send 0 if not available" of the format page: unknown, never published.
   const min = decodePayload('0300FF6300008001800180010000');
   assert.equal(min.temperature, -127.99);
-  assert.equal(min.pressure, 50000);
-  assert.equal(min.voltage, 0);
+  assert.equal(min.humidity, null);
+  assert.equal(min.pressure, null);
+  assert.equal(min.voltage, null);
+  const zeros = decodePayload('0300000000000000000000000000');
+  for (const field of ['temperature', 'humidity', 'pressure', 'voltage']) {
+    assert.equal(zeros[field], null, `an all-zero RAWv1 frame: ${field}`);
+  }
+  // 0 °C alone is a plausible temperature, kept.
+  assert.equal(decodePayload('03290000CE1EFC18F94202CA0B53').temperature, 0);
   // The doc example of a negative temperature: 0x8145 is -1.69 °C.
   assert.equal(decodePayload('03298145CE1EFC18F94202CA0B53').temperature, -1.69);
   // A fraction above 99 is not a temperature.
@@ -177,8 +186,8 @@ test('frames are bounded and walked strictly: nothing is read past the end', () 
   assert.deepEqual(decodeFrame('zz'), { ok: false, why: 'frame' });
   assert.deepEqual(decodeFrame('00'.repeat(300)), { ok: false, why: 'frame' }, 'too long');
   assert.deepEqual(decodeFrame(42), { ok: false, why: 'frame' });
-  // An AD length running past the end.
-  assert.deepEqual(decodeFrame('0201061BFF990405'), { ok: false, why: 'other' });
+  // An AD length running past the end: a cut frame, counted as such.
+  assert.deepEqual(decodeFrame('0201061BFF990405'), { ok: false, why: 'frame' });
   // Another manufacturer (Apple 0x004C).
   assert.deepEqual(decodeFrame('0201061AFF4C000215'.padEnd(62, '0')), {
     ok: false,
@@ -199,7 +208,13 @@ test('frames are bounded and walked strictly: nothing is read past the end', () 
   const bytes = hexToBytes(
     '03190000' + '0201061BFF99040512FC5394C37C0004FFFC040CAC364200CDCBB8334C884F',
   );
-  assert.equal(ruuviPayload(bytes)[0], 5);
+  assert.equal(ruuviPayload(bytes).payload[0], 5);
+  // A Ruuvi payload longer than its format (6 bytes more) is refused.
+  assert.deepEqual(
+    decodeFrame('02010621FF99040512FC5394C37C0004FFFC040CAC364200CDCBB8334C884F000000000000'),
+    { ok: false, why: 'long' },
+  );
+  assert.equal(decodePayload('0512FC5394C37C0004FFFC040CAC364200CDCBB8334C884F00'), null);
   assert.equal(decodePayload('06'), null);
   assert.equal(decodePayload('05FFFF'), null);
 });

@@ -68,8 +68,8 @@
         "fr": "Intervalle de lecture (minutes)"
       },
       "description": {
-        "en": "Each read sends one request to the gateway for the last frame of every tag. Nothing reads sooner, not even the test button or a restart.",
-        "fr": "Chaque lecture envoie une requête à la passerelle pour la dernière trame de chaque capteur. Rien ne lit plus tôt, ni le bouton de test ni un redémarrage."
+        "en": "Each read sends one request to the gateway for the last frame of every tag. Nothing reads sooner, not even the test button or a restart; only another address or key is tried without waiting for the interval (within about a minute).",
+        "fr": "Chaque lecture envoie une requête à la passerelle pour la dernière trame de chaque capteur. Rien ne lit plus tôt, ni le bouton de test ni un redémarrage ; seule une autre adresse ou une autre clé est essayée sans attendre l'intervalle (dans la minute environ)."
       },
       "required": false,
       "default": 2,

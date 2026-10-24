@@ -15,10 +15,13 @@ the official documentation of Ruuvi, cited below.
   example of it is reproduced in this integration or its documentation: the
   pages are cited by their address. The integration implements the
   published specification (field offsets, scales and "not available"
-  values), and its tests check the decoder against the test vectors listed
-  in the data format pages (hexadecimal frames and their expected values),
-  which the docs say are based on the tests of the
-  [ttu/ruuvitag-sensor](https://github.com/ttu/ruuvitag-sensor) project.
+  values).
+- Test vectors: `test/ruuvitag.test.js` takes the test vectors listed in the
+  data format pages as facts (hexadecimal frames and their expected
+  values), without any text of the docs. The docs say these vectors come
+  from the tests of
+  [ttu/ruuvitag-sensor](https://github.com/ttu/ruuvitag-sensor) (MIT
+  license, Tomi Tuhkanen), the origin of the vectors the Ruuvi docs repeat.
 - Pages used:
   - Polling mode of the gateway (`GET /history`, bearer key):
     https://docs.ruuvi.com/ruuvi-gateway-firmware/examples/polling-mode

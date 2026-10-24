@@ -44,6 +44,14 @@ const asSourceError = (err) => (err instanceof SourceError ? err : new SourceErr
 /** "c6a5b9e0ad06" -> "Ruuvi AD06", the name the Ruuvi apps give a tag. */
 const tagName = (key) => `Ruuvi ${key.slice(8).toUpperCase()}`;
 
+/**
+ * An instant of the gateway (ms), or null when missing or before 2020: a
+ * gateway whose clock is not set counts from 1970, its instants prove
+ * nothing.
+ */
+const CLOCK_SET = Date.parse('2020-01-01T00:00:00Z');
+const sane = (ms) => (typeof ms === 'number' && ms >= CLOCK_SET ? ms : null);
+
 const newTag = ({ key, fields = [], mark = '', markTs = null, markAt = 0, seenAt = 0 }) => ({
   key,
   name: tagName(key),
@@ -161,6 +169,9 @@ export class RuuviGatewayApp {
     }
     this.timers.clearTimeout(this.flushTimer);
     this.flushTimer = undefined;
+    // The states still waiting stay, with the instant of their measurement:
+    // flushStates() judges them again when they leave (dropped past an
+    // hour, dated past recentMs()), however long the stop lasted.
   }
 
   /** The container stops: the state file is written, the timers dropped. */
@@ -302,15 +313,22 @@ export class RuuviGatewayApp {
    * and Cut-RAWv2), else the instant the gateway heard it (RAWv1), else the
    * frame itself. A frame with the same mark is the same measurement sent
    * again: it changes nothing, so a tag whose sensor stopped measuring is
-   * never shown alive by the gateway hearing it. The age of a measurement
-   * is counted on the clock of the gateway (the instant it first heard the
-   * mark, against the instant of the answer); without these instants, from
-   * the instant this integration first saw the mark.
+   * never shown alive by the gateway hearing it.
+   *
+   * The age of a measurement is counted on the clock of the gateway (the
+   * instant it first heard the mark, against the instant of the answer).
+   * Without these instants (a gateway without timestamps, or whose clock is
+   * not set: the firmware then returns its whole table, old frames
+   * included), a mark seen for the first time proves nothing and gives no
+   * value; only a mark that changed since the previous read of this process
+   * is a recent measurement, at most as old as that previous read.
    */
-  applyHistory({ gwTime, tags }) {
+  applyHistory({ gwTime: rawGwTime, tags }) {
     const readAt = this.now();
+    const gwTime = sane(rawGwTime);
     this.ignored = {};
     this.more = 0;
+    const accepted = [];
     for (const [key, entry] of tags) {
       const decoded = decodeFrame(entry.data);
       if (!decoded.ok) {
@@ -326,12 +344,31 @@ export class RuuviGatewayApp {
         this.ignored.mac = (this.ignored.mac ?? 0) + 1;
         continue;
       }
-      if (entry.ts !== null && gwTime !== null && entry.ts - gwTime > FUTURE_TOLERANCE) {
+      const ts = gwTime === null ? null : sane(entry.ts);
+      if (ts !== null && ts - gwTime > FUTURE_TOLERANCE) {
         this.ignored.future = (this.ignored.future ?? 0) + 1;
         continue;
       }
+      accepted.push({ key, entry, measure, ts });
+    }
+    // The places go to the tags created in Gladys first, then to the tags
+    // already known, then to new ones: a crowd of tags never pushes out a
+    // created one. A created tag takes the place of the known tag not
+    // created and heard the longest ago.
+    const rank = ({ key }) => (isCreated(this.gladys, key) ? 0 : this.tags.has(key) ? 1 : 2);
+    accepted.sort((a, b) => rank(a) - rank(b));
+    for (const item of accepted) {
+      const { key, entry, measure, ts } = item;
       let tag = this.tags.get(key);
       if (!tag) {
+        if (this.tags.size >= MAX_TAGS && rank(item) === 0) {
+          const victim = [...this.tags.values()]
+            .filter((t) => !isCreated(this.gladys, t.key))
+            .sort((a, b) => a.seenAt - b.seenAt)[0];
+          if (victim) {
+            this.tags.delete(victim.key);
+          }
+        }
         if (this.tags.size >= MAX_TAGS) {
           this.more += 1;
           continue;
@@ -340,16 +377,18 @@ export class RuuviGatewayApp {
         this.tags.set(key, tag);
       }
       // The instant the gateway last heard the tag, on the clock of Gladys.
-      const heardAge = entry.ts !== null && gwTime !== null ? Math.max(0, gwTime - entry.ts) : 0;
+      const heardAge = ts !== null ? Math.max(0, gwTime - ts) : 0;
       tag.seenAt = Math.max(tag.seenAt, readAt - heardAge);
       for (const field of fieldsOf({ ...measure, rssi: entry.rssi })) {
         tag.fields.add(field);
       }
+      const lastReadAt = tag.lastReadAt;
+      tag.lastReadAt = readAt;
       const mark =
         measure.sequence !== null
           ? `s:${measure.sequence}`
-          : entry.ts !== null
-            ? `t:${entry.ts}`
+          : ts !== null
+            ? `t:${ts}`
             : `r:${entry.data.toLowerCase()}`;
       if (tag.sample?.mark === mark) {
         continue;
@@ -357,19 +396,29 @@ export class RuuviGatewayApp {
       // After a restart, the measurement already published keeps the
       // instants it had: its age is never reset by the restart.
       const known = mark === tag.published.mark;
-      const firstTs = known && tag.published.markTs !== null ? tag.published.markTs : entry.ts;
+      const firstTs = known && tag.published.markTs !== null ? tag.published.markTs : ts;
       const markAt = known && tag.published.markAt > 0 ? tag.published.markAt : readAt;
-      const age =
-        firstTs !== null && gwTime !== null ? gwTime - firstTs : Math.max(0, readAt - markAt);
+      const previous = tag.sample;
+      let age;
+      if (firstTs !== null && gwTime !== null) {
+        age = gwTime - firstTs;
+      } else if (previous && lastReadAt !== undefined) {
+        // The mark changed since the previous read: measured since then.
+        age = readAt - lastReadAt;
+      } else {
+        // Seen for the first time without the instants of the gateway: it
+        // may be the last frame of a tag silent for days. No value.
+        age = null;
+      }
       // Motion: the movement counter of the frame moved since the previous
       // measurement of the same tag, if that one is at most an hour old
       // (never across a restart: the first measurement gives no motion).
-      const previous = tag.sample;
       const motion =
         measure.movement !== null &&
         previous &&
         previous.movement !== null &&
-        this.ageOf(previous, readAt) <= STALE
+        age !== null &&
+        this.isFresh(previous, readAt)
           ? Number(measure.movement !== previous.movement)
           : null;
       tag.sample = {
@@ -377,7 +426,7 @@ export class RuuviGatewayApp {
         mark,
         firstTs,
         markAt,
-        age: Math.max(0, age),
+        age: age === null ? null : Math.max(0, age),
         readAt,
         movement: measure.movement,
       };
@@ -393,7 +442,7 @@ export class RuuviGatewayApp {
 
   /** The age of a measurement now, on the clock of the gateway. */
   ageOf(sample, now = this.now()) {
-    return sample.age + Math.max(0, now - sample.readAt);
+    return sample.age === null ? Infinity : sample.age + Math.max(0, now - sample.readAt);
   }
 
   /** A failed read: refusal, pause or a passing failure (retried at the interval). */
@@ -532,9 +581,9 @@ export class RuuviGatewayApp {
         continue;
       }
       const isNew = sample.mark !== tag.published.mark;
-      const age = this.ageOf(sample, now);
-      const dated = !isNew || age > this.recentMs();
-      const createdAt = new Date(now - age).toISOString();
+      // The instant of the measurement, on the clock of Gladys: kept with
+      // each waiting state, so the state is judged again when it leaves.
+      const measuredAt = now - this.ageOf(sample, now);
       let sent = false;
       for (const state of statesOf(this.gladys, { tagKey: tag.key, values: sample.values })) {
         const id = state.device_feature_external_id;
@@ -547,7 +596,9 @@ export class RuuviGatewayApp {
           continue;
         }
         this.pushed.set(id, sample.mark);
-        this.backlog.set(id, dated ? { ...state, created_at: createdAt } : state);
+        // A measurement already published elsewhere goes dated to a feature
+        // created since.
+        this.backlog.set(id, { state, measuredAt, dated: !isNew });
         sent = true;
       }
       if (sent && isNew) {
@@ -569,7 +620,19 @@ export class RuuviGatewayApp {
     return STATES_PER_MINUTE - this.sentLog.reduce((sum, [, n]) => sum + n, 0);
   }
 
+  /**
+   * Send what waits, within the budget. Each state is judged when it
+   * leaves, whatever the time it waited (a full budget, a failed publication,
+   * a disconnection of hours): more than an hour old, it is dropped; older
+   * than `recentMs()`, it goes dated (`created_at`), never as current.
+   */
   async flushStates() {
+    const now = this.now();
+    for (const [id, item] of this.backlog) {
+      if (now - item.measuredAt > STALE) {
+        this.backlog.delete(id);
+      }
+    }
     if (this.backlog.size === 0) {
       return;
     }
@@ -578,10 +641,15 @@ export class RuuviGatewayApp {
       this.scheduleFlush();
       return;
     }
-    const batch = [...this.backlog.values()].slice(0, budget);
-    for (const state of batch) {
-      this.backlog.delete(state.device_feature_external_id);
+    const items = [...this.backlog.entries()].slice(0, budget);
+    for (const [id] of items) {
+      this.backlog.delete(id);
     }
+    const batch = items.map(([, item]) =>
+      item.dated || now - item.measuredAt > this.recentMs()
+        ? { ...item.state, created_at: new Date(item.measuredAt).toISOString() }
+        : item.state,
+    );
     // The batch is reserved in the budget BEFORE the await: a flush running
     // meanwhile (a test button, a created device) sees the room already taken.
     const entry = [this.now(), batch.length];
@@ -593,10 +661,11 @@ export class RuuviGatewayApp {
     } catch (err) {
       entry[1] = 0;
       this.logger.warn(`Publishing the states failed: ${err.message}`);
-      // Sent again later, unless a newer value came in meanwhile.
-      for (const state of batch) {
-        if (!this.backlog.has(state.device_feature_external_id)) {
-          this.backlog.set(state.device_feature_external_id, state);
+      // Sent again later (judged again then), unless a newer value came in
+      // meanwhile.
+      for (const [id, item] of items) {
+        if (!this.backlog.has(id)) {
+          this.backlog.set(id, item);
         }
       }
       this.scheduleFlush(60_000);
@@ -667,7 +736,7 @@ export class RuuviGatewayApp {
     const now = this.now();
     for (const tag of this.tags.values()) {
       if (!this.isFresh(tag.sample, now) && !this.error) {
-        list.push({ name: tag.name, kind: 'stale' });
+        list.push({ name: tag.name, kind: tag.sample?.age === null ? 'waiting' : 'stale' });
       }
     }
     return list;
@@ -695,7 +764,12 @@ export class RuuviGatewayApp {
     const now = this.now();
     const failing = this.failing();
     const anyValue = [...this.tags.values()].some((t) => this.isFresh(t.sample, now));
-    const text = T.ok({ tags: this.tags.size, interval: this.config.pollMinutes, failing });
+    const text = T.ok({
+      tags: this.tags.size,
+      interval: this.config.pollMinutes,
+      stopped: this.error === 'refused',
+      failing,
+    });
     return this.setStatus(
       this.error !== 'refused' && (anyValue || failing.length === 0),
       this.withNotes(text),
@@ -716,7 +790,7 @@ export class RuuviGatewayApp {
     };
     if (!this.isFresh(tag.sample, now)) {
       const why = tag.sample
-        ? reason('stale')[lang]
+        ? reason(tag.sample.age === null ? 'waiting' : 'stale')[lang]
         : lang === 'fr'
           ? 'pas encore lu depuis le démarrage'
           : 'not read since the start';

@@ -16,6 +16,10 @@ export const REASONS = {
     fr: "réponse qui n'est pas celle d'une Ruuvi Gateway",
   },
   stale: { en: 'no recent measurement', fr: 'pas de mesure récente' },
+  waiting: {
+    en: 'waiting for a new measurement (the gateway gives no time)',
+    fr: "en attente d'une nouvelle mesure (la passerelle ne donne pas l'heure)",
+  },
 };
 
 export const reason = (kind) => REASONS[kind] ?? REASONS.failed;
@@ -74,9 +78,13 @@ export const T = {
     fr: `en pause jusqu'à ${utcTime(until)}`,
   }),
   /** The connected status: what is read, how often, and what fails. */
-  ok: ({ tags, interval, failing = [] }) => {
-    let en = `${tags} RuuviTag(s) through the Ruuvi Gateway, read every ${interval} min.`;
-    let fr = `${tags} RuuviTag(s) via la Ruuvi Gateway, lu(s) toutes les ${interval} min.`;
+  ok: ({ tags, interval, stopped = false, failing = [] }) => {
+    let en = stopped
+      ? `${tags} RuuviTag(s) through the Ruuvi Gateway, reads stopped.`
+      : `${tags} RuuviTag(s) through the Ruuvi Gateway, read every ${interval} min.`;
+    let fr = stopped
+      ? `${tags} RuuviTag(s) via la Ruuvi Gateway, lectures arrêtées.`
+      : `${tags} RuuviTag(s) via la Ruuvi Gateway, lu(s) toutes les ${interval} min.`;
     if (failing.length > 0) {
       en += ` Without value: ${failing.map((f) => `${f.name} (${reason(f.kind).en})`).join(', ')}.`;
       fr += ` Sans valeur : ${failing.map((f) => `${f.name} (${reason(f.kind).fr})`).join(', ')}.`;
