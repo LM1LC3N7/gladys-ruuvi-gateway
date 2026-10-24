@@ -120,8 +120,11 @@ test('data format 3 (RAWv1): the vectors of the docs', () => {
   assert.equal(max.voltage, 65.535);
   // The minimum vector: humidity 0, raw pressure 0 and voltage 0 are the
   // "send 0 if not available" of the format page: unknown, never published.
+  // Its temperature (-127.99) goes unknown too: humidity and pressure both
+  // at 0 mean no environment sensor.
   const min = decodePayload('0300FF6300008001800180010000');
-  assert.equal(min.temperature, -127.99);
+  assert.equal(min.temperature, null);
+  assert.equal(decodePayload('0302FF6300008001800180010000').temperature, -127.99);
   assert.equal(min.humidity, null);
   assert.equal(min.pressure, null);
   assert.equal(min.voltage, null);
@@ -129,6 +132,12 @@ test('data format 3 (RAWv1): the vectors of the docs', () => {
   for (const field of ['temperature', 'humidity', 'pressure', 'voltage']) {
     assert.equal(zeros[field], null, `an all-zero RAWv1 frame: ${field}`);
   }
+  // Humidity, temperature and pressure at 0 with a sane accelerometer and
+  // battery: no environment sensor, the 0 °C is unknown too.
+  const noSensor = decodePayload('030000000000FC18001003E80B54');
+  assert.equal(noSensor.temperature, null);
+  assert.equal(noSensor.accelerationX, -1);
+  assert.equal(noSensor.voltage, 2.9);
   // 0 °C alone is a plausible temperature, kept.
   assert.equal(decodePayload('03290000CE1EFC18F94202CA0B53').temperature, 0);
   // The doc example of a negative temperature: 0x8145 is -1.69 °C.

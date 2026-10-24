@@ -151,18 +151,18 @@ function decodeCutRawV2(p) {
  * of hundredths (0 to 99). The format page gives no specific "not
  * available" value and suggests sending 0: a humidity of 0, a raw pressure
  * of 0 (50 000 Pa) and a voltage of 0 are taken as not available; a
- * temperature of 0 °C is plausible and kept, unless every field of the
- * frame is 0. A fraction above 99 is refused too.
+ * temperature of 0 °C is plausible and kept, unless the raw humidity and
+ * the raw pressure are both 0 too (no environment sensor). A fraction above 99 is refused too.
  */
 function decodeRawV1(p) {
   const fraction = u8(p, 3);
   const whole = u8(p, 2) & 0x7f;
   const negative = (u8(p, 2) & 0x80) !== 0;
-  const allZero = p.subarray(1, 14).every((b) => b === 0);
-  const temperature =
-    fraction > 99 || allZero ? null : (negative ? -1 : 1) * (whole + fraction / 100);
   const humidity = u8(p, 1);
   const pressure = u16(p, 4);
+  const noSensor = humidity === 0 && pressure === 0;
+  const temperature =
+    fraction > 99 || noSensor ? null : (negative ? -1 : 1) * (whole + fraction / 100);
   const voltage = u16(p, 12);
   return {
     format: 3,

@@ -46,8 +46,7 @@ address (as in the Ruuvi apps; rename it when you create it):
   these two are plain values, the unit is only written in their name.
 - A value the tag marks "not available" in its frame (0x8000, 0xFFFF and the
   like in RAWv2 and Cut-RAWv2; in RAWv1, which has no such value, a humidity,
-  a raw pressure or a voltage of 0, and a temperature of 0 when the whole
-  frame is 0), or outside the range of the feature, is left out, never
+  a raw pressure or a voltage of 0, and a temperature of 0 when the humidity and the raw pressure are 0 too), or outside the range of the feature, is left out, never
   replaced by a guess.
 
 ### Data formats

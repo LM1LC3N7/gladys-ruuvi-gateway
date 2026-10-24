@@ -403,8 +403,10 @@ export class RuuviGatewayApp {
       if (firstTs !== null && gwTime !== null) {
         age = gwTime - firstTs;
       } else if (previous && lastReadAt !== undefined) {
-        // The mark changed since the previous read: measured since then.
-        age = readAt - lastReadAt;
+        // The mark changed since the previous read: measured since then, at
+        // most one interval ago (a read that starts late does not age the
+        // measurement).
+        age = Math.min(readAt - lastReadAt, this.intervalMs());
       } else {
         // Seen for the first time without the instants of the gateway: it
         // may be the last frame of a tag silent for days. No value.
@@ -537,7 +539,16 @@ export class RuuviGatewayApp {
 
   /** A measurement at most one hour old (on the clock of the gateway). */
   isFresh(sample, now = this.now()) {
-    return Boolean(sample) && this.ageOf(sample, now) <= STALE;
+    return Boolean(sample) && this.ageOf(sample, now) <= this.freshMs();
+  }
+
+  /**
+   * The oldest a measurement may be to count: one hour, or the interval + a
+   * margin when the interval is that long (a read every 60 minutes keeps its
+   * values).
+   */
+  freshMs() {
+    return Math.max(STALE, this.intervalMs() + RECENT_MARGIN);
   }
 
   /**
@@ -629,7 +640,7 @@ export class RuuviGatewayApp {
   async flushStates() {
     const now = this.now();
     for (const [id, item] of this.backlog) {
-      if (now - item.measuredAt > STALE) {
+      if (now - item.measuredAt > this.freshMs()) {
         this.backlog.delete(id);
       }
     }

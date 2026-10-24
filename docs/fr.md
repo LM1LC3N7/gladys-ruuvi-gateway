@@ -51,8 +51,7 @@ caractères de son adresse MAC (comme dans les applications Ruuvi ; renommez-le
   dans leur nom.
 - Une valeur que le capteur marque « non disponible » dans sa trame (0x8000,
   0xFFFF et semblables en RAWv2 et Cut-RAWv2 ; en RAWv1, qui n'a pas de telle
-  valeur, une humidité, une pression brute ou une tension à 0, et une
-  température à 0 quand toute la trame vaut 0), ou hors de la plage de la
+  valeur, une humidité, une pression brute ou une tension à 0, et une température à 0 quand l'humidité et la pression brute valent 0 aussi), ou hors de la plage de la
   fonction, est laissée de côté, jamais remplacée par une supposition.
 - Les noms des fonctions sont en anglais ; renommez-les à la création si vous
   le souhaitez.

@@ -735,3 +735,25 @@ test('a refused key: the status says the reads are stopped', async () => {
   assert.match(ctx.gladys.fake.connectionStatus.message.fr, /lectures arrêtées/);
   assert.doesNotMatch(ctx.gladys.fake.connectionStatus.message.en, /read every/);
 });
+
+test('no gateway time and an interval of 60 min: late ticks still publish each new measurement', async () => {
+  let sequence = 7;
+  const config = { ...CONFIG, poll_interval: 60 };
+  const ctx = await setup({ config, answer: () => noTimestamps(sequence) });
+  await ctx.app.start(config);
+  const batches = spyStates(ctx.gladys);
+  await createAll(ctx.gladys);
+  for (let period = 1; period <= 4; period += 1) {
+    sequence += 1;
+    // Ticks a little late: each read starts a few seconds past the hour.
+    for (let t = 0; t < 60 * 60_000 + 30_000; t += 15_007) {
+      ctx.clock.now += 15_007;
+      await ctx.timers.runIntervals();
+    }
+  }
+  const temperatures = batches
+    .flat()
+    .filter((s) => s.device_feature_external_id === `${SALON_ID}:temperature`);
+  assert.equal(temperatures.length, 4, 'one per period');
+  assert.doesNotMatch(ctx.gladys.fake.connectionStatus.message.en, /no recent measurement/);
+});
