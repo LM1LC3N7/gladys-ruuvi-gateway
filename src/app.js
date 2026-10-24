@@ -440,10 +440,10 @@ export class RuuviGatewayApp {
       if (firstTs !== null && gwTime !== null) {
         age = gwTime - firstTs;
       } else if (previous && lastReadAt !== undefined) {
-        // The mark changed since the previous read: measured since then, at
-        // most one interval ago (a read that starts late does not age the
-        // measurement).
-        age = Math.min(readAt - lastReadAt, this.intervalMs());
+        // The mark changed since the previous successful read: measured
+        // since then, so possibly as long ago as that read (after a gap of
+        // hours, too old to count). Never bounded by the interval.
+        age = readAt - lastReadAt;
       } else {
         // Seen for the first time without the instants of the gateway: it
         // may be the last frame of a tag silent for days. No value.

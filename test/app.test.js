@@ -757,3 +757,38 @@ test('no gateway time and an interval of 60 min: late ticks still publish each n
   assert.equal(temperatures.length, 4, 'one per period');
   assert.doesNotMatch(ctx.gladys.fake.connectionStatus.message.en, /no recent measurement/);
 });
+
+test('no gateway time: a new mark after a gap of hours is never current', async () => {
+  for (const gapKind of ['disconnected', 'errors']) {
+    let sequence = 7;
+    let failing = false;
+    const ctx = await setup({
+      answer: () => (failing ? json({}, 500) : noTimestamps(sequence)),
+    });
+    await ctx.app.start(CONFIG);
+    await createAll(ctx.gladys);
+    // A first change of mark: a value, so the tag is known and proven.
+    sequence = 8;
+    ctx.clock.now += 2 * 60_000;
+    await ctx.timers.runIntervals();
+    const batches = spyStates(ctx.gladys);
+    if (gapKind === 'disconnected') {
+      ctx.app.stop();
+      ctx.clock.now += 3 * 60 * 60_000;
+    } else {
+      failing = true;
+      await advance(ctx, 3 * 60 * 60_000);
+      failing = false;
+    }
+    // Back: the mark changed at some time during the 3 hours.
+    sequence = 9;
+    if (gapKind === 'disconnected') {
+      await ctx.app.start(CONFIG);
+    } else {
+      await advance(ctx, 2 * 60_000);
+    }
+    const sent = batches.flat().filter((s) => s.device_feature_external_id.startsWith(SALON_ID));
+    assert.equal(sent.length, 0, `${gapKind}: nothing measured at an unknown time is sent`);
+    fake.restore();
+  }
+});
