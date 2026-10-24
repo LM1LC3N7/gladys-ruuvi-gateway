@@ -1,61 +1,200 @@
-# Demo Devices Template
+# Ruuvi Gateway
 
-This is the user documentation of the integration. Gladys re-hosts this file
-and shows a permanent **Documentation** link to it in the Configuration screen
-(in the user's language, with English as the fallback) — it is when
-configuring that the user needs it most. Keep the short onboarding hints in
-the `section` blocks of the manifest `config_schema`; put the long
-step-by-step (screenshots, troubleshooting…) here.
+**Unofficial connector, not affiliated with Ruuvi.** It brings into Gladys
+the **RuuviTag** sensors that your **Ruuvi Gateway** hears, read through the
+local HTTP API of the gateway, on your own network (no cloud).
+
+> **This integration has never been tested with a real gateway.** It follows
+> the official documentation of Ruuvi
+> ([docs.ruuvi.com](https://docs.ruuvi.com)) and its published test frames.
+> Please report what you see on the Gladys forum.
+
+## What you need
+
+- A **Ruuvi Gateway** on the same local network as Gladys, with a fixed
+  address (set it in your router). The gateway listens to the tags over
+  Bluetooth and relays them; this integration does not use Bluetooth (a
+  Gladys integration runs in a container without Bluetooth).
+- The **read-only access by API key** turned on: open the configuration
+  pages of the gateway in a browser (`http://<address of the gateway>`), go
+  to **Access settings**, turn on the read-only access with a bearer API key
+  and copy that key. This is the "polling mode" of the Ruuvi documentation
+  ([polling mode](https://docs.ruuvi.com/ruuvi-gateway-firmware/examples/polling-mode)).
+  A gateway that allows the LAN without a password works without a key.
 
 ## What you get
 
-Six demo devices show up after installation: a weather station (real data
-from Open-Meteo), a switch, a dimmable light, a smart plug with power
-metering, a motion sensor and a camera.
+One Gladys device per tag, named "Ruuvi" and the last four digits of its MAC
+address (as in the Ruuvi apps; rename it when you create it):
+
+| Feature             | Unit               | Notes                                                     |
+| ------------------- | ------------------ | --------------------------------------------------------- |
+| Temperature         | °C                 |                                                           |
+| Humidity            | %                  |                                                           |
+| Pressure            | hPa                |                                                           |
+| Motion              | none (0 or 1)      | 1 when the tag felt a movement since its previous measure |
+| Battery voltage (V) | none (in the name) | about 3 V new; replace the battery below about 2.5 V      |
+| Signal (dBm)        | none (in the name) | the Bluetooth signal between the tag and the gateway      |
+
+- **Motion**: the tag counts the movements it feels (movement counter of the
+  frame). At each read, Motion is 1 when the counter moved since the
+  previous measurement of the tag, 0 otherwise. It needs two measurements in
+  a row, at most an hour apart: the first measurement after a start gives
+  no Motion value. A tag sends its counter only in the RAWv2 and Cut-RAWv2
+  formats.
+- Gladys has no unit for a voltage nor a signal in dBm in these categories:
+  these two are plain values, the unit is only written in their name.
+- A value the tag marks "not available" in its frame (0x8000, 0xFFFF and the
+  like), or outside the range of the feature, is left out, never replaced
+  by a guess.
+
+### Data formats
+
+The integration decodes the frames itself (`GET /history?decode=false`),
+after the format pages of Ruuvi:
+
+- **5 (RAWv2)**, the format of RuuviTags since 2019:
+  [data format 5](https://docs.ruuvi.com/communication/bluetooth-advertisements/data-format-5-rawv2);
+- **C5 (Cut-RAWv2)**, RAWv2 without the acceleration:
+  [data format C5](https://docs.ruuvi.com/communication/bluetooth-advertisements/data-format-c5-rawv2);
+- **3 (RAWv1)**, the old format (no measurement number, no movement
+  counter):
+  [data format 3](https://docs.ruuvi.com/communication/bluetooth-advertisements/data-format-3-rawv1).
+
+The formats of Ruuvi Air (6 and E1), format 8 and the URL
+formats are not decoded: the status counts them ("Ruuvi frame(s) not
+decoded"). Beacons of other brands relayed by the gateway are ignored.
+
+## Installation
+
+1. Install the integration from the Gladys catalog (Gladys 5.1 or newer).
+2. In the **Configuration** screen, enter the **address of the gateway**
+   (for example `192.168.1.50`, with `:port` if it is not 80) and the
+   **read-only API key**.
+3. Click **Test the gateway**: the message shows the main values of each
+   tag.
+4. Open the **Discovery** tab and add the devices. Their values arrive as
+   soon as they are created.
 
 ## Configuration
 
-1. Open the **Configuration** tab of the integration.
-2. Set the **latitude** and **longitude** the demo weather station should
-   observe (they default to Paris), and pick your temperature unit.
-   The **refresh interval** sets how often the weather station and the
-   plug's power are read: every 5 minutes by default, every minute at most.
-3. Save: the devices appear in the **Discovery** tab, ready to be added.
+- **Address of the gateway**: an IP address or a host name, with an
+  optional port; `http://` in front is accepted, `https://` too if you put
+  the gateway behind a reverse proxy with a valid certificate. A path, a
+  user name, a space, a multicast or a broadcast address are refused at once
+  ("not valid") and nothing is sent.
+- **Read-only API key**: kept by Gladys in its database (in clear, like every
+  secret field of Gladys) and never shown again in the configuration
+  screen. It is sent only to the gateway, in the `Authorization: Bearer`
+  header of each read, never in a URL, a log, a status nor under `/data`.
+  **The gateway speaks plain HTTP on the local network**
+  ([open ports](https://docs.ruuvi.com/ruuvi-gateway-firmware/gw-open-ports-services)):
+  the key crosses your network as is, so use the read-only key (never the
+  read-write one), on a network you trust. A key holding a space or a
+  character that is not printable ASCII is refused at once and never sent
+  nor shown back.
+- **Read interval**: 2 minutes by default, 1 to 60.
 
-The **Prefer the local connection** toggle drives the demo plug: it reports
-the channel it actually uses as a badge (local or cloud), with an orange dot
-when it runs degraded (local refused, cloud fallback).
+## How often the gateway is read
 
-## Actions
+- At each interval, **one request**: `GET /history?decode=false`, the last
+  frame of every tag the gateway heard. Nothing is ever written to the
+  gateway.
+- **Never faster than the interval**, counted from the last read: not by the
+  test button, a reconnection to Gladys, a saved configuration, the
+  Discovery tab nor a restart of the container. Only another address or key
+  is tried at once. Before the interval has passed, the test button shows
+  the last values and the time of the next possible read.
+- A gateway that does not answer is tried again at the next interval.
+- When the gateway answers **429 or a 5xx**, it is left alone for the
+  `Retry-After` delay given, else 5 minutes, then 10, 20...; always between
+  1 minute and 6 hours, also across a restart.
+- When the gateway **refuses the key** (401 or 403), or sends to its sign-in
+  page (a redirection: a key is needed), the reads stop **for good** and the
+  status says so: no new try on its own, even after a restart. Change the
+  address or the key (tried at once), or press the test button once the
+  interval has passed (one try; the stop is lifted only if it works).
+  Saving the configuration unchanged never lifts the stop.
 
-- **Test the weather provider** — performs a live request to Open-Meteo and
-  shows the current temperature and humidity under the button.
-- **Identify a device** — pick one of your devices in the list and it will
-  signal itself (the demo light "blinks" in the logs).
+## Which values reach Gladys
 
-## Scenes
+- A measurement is recognised by its **measurement number** (the sequence
+  number of the frame, RAWv2 and Cut-RAWv2), else by the instant the
+  gateway heard it (RAWv1), else by the frame itself. The gateway hears the
+  same measurement many times: it is handed to Gladys **once**. The mark of
+  the last measurement handed over is kept under `/data` (written at once
+  by a clean stop), so a restart does not send it again.
+- So a tag that **stops measuring** sends nothing, even if the gateway still
+  hears its last frame: neither its measures nor its signal, which are only
+  sent with a new measurement. After an hour without a new measurement, the
+  status lists it as "no recent measurement".
+- The age of a measurement is counted on the **clock of the gateway**: from
+  the instant it first heard that measurement to the instant of its answer
+  (both given by the gateway), so a Gladys clock that is off never makes it
+  look older or newer. Without these instants, the age is counted from the
+  first time the integration saw the measurement.
+- A new measurement at most 5 minutes old (or the interval + 2 minutes) is
+  sent as the current value; older, up to one hour, it is sent **dated**
+  (Gladys records it at its real time and no scene fires); older than one
+  hour, never. A frame more than 5 minutes ahead of the clock of the gateway
+  is ignored, as is a frame whose MAC address is not the one the gateway
+  filed it under.
+- At most **250 values per minute** are sent to Gladys (the core accepts
+  300): with many tags, the rest follows in the next minute. Unchanged
+  values are not sent again (but every 30 minutes).
 
-The integration adds its own cards to the scene editor (Gladys 5.1 or
-later), under the **Integrations** category:
+## What is kept under `/data`
 
-- **Motion detected** (trigger) — starts the scene when a demo motion sensor
-  sees something move. Optionally pick the sensor and what moved (person,
-  animal); left empty, any detection matches. The following actions can
-  read what moved with `{{triggerEvent.data.target}}`.
-- **Identify a device** (action) — makes the chosen device signal itself.
-  It returns whether the device could signal itself, so the following
-  actions can depend on it.
+The instant of the last read, the pause, the refusal, the MAC address of the
+gateway and the tags met (MAC address, measures, mark of the last
+measurement handed to Gladys, last time heard: nothing secret) survive a
+reconnection and a restart of the container. The instant of a read is
+written before its request leaves, and the file is written at most once per
+minute but for a pause, a refusal or a new tag (written at once). The key is
+never written: while it is refused, the file keeps only an 8-bit marker of
+a salted hash of the address and key (1 key in 256 gives the same marker:
+nothing that could find the key back), so that after a restart another key
+is tried at once.
 
-## Dashboard
+At most 50 tags are read; an answer larger than 1 MB, or slower than 10
+seconds, is abandoned. A tag neither heard for a week nor created in Gladys
+(a neighbour's tag that passed by) leaves the Discovery list.
 
-Add the **Demo status** widget to a dashboard: it shows the live
-temperature of the weather station and the power of the office plug, the
-connection the plug currently uses (orange when degraded) and the observed
-location. Its **Identify the light** button makes the demo light signal
-itself.
+## External ids
+
+`ext:ruuvi-gateway:tag:<MAC>`, the MAC address of the tag as the gateway
+gives it, in 12 lowercase hexadecimal digits without separators
+(`C6:A5:B9:E0:AD:06` gives `c6a5b9e0ad06`), then `:<feature>`
+(`temperature`, `humidity`, `pressure`, `motion`, `battery_voltage`,
+`signal`). These ids never change.
 
 ## Troubleshooting
 
-The integration logs everything it does: check the integration logs from the
-Gladys UI (or `docker logs` on the host) with `LOG_LEVEL=debug` for the full
-detail.
+- **"access refused"**: check the read-only API key on the Access settings
+  page of the gateway, then change it in the configuration, or press the
+  test button.
+- **"not an answer of a Ruuvi Gateway"**: the address points to another
+  device, or the firmware of the gateway is too old for the polling mode
+  (update it from its configuration pages).
+- **"no recent measurement"**: the tag has not sent a new measurement for an
+  hour (out of range, empty battery, gateway filter).
+- **"Ruuvi frame(s) not decoded"**: a Ruuvi Air or a tag in a format this
+  integration does not decode.
+- Logs: the level is set with the `LOG_LEVEL` variable.
+
+## Privacy
+
+The integration talks only to your gateway, on your network. Of its answers,
+it keeps only the MAC address and the measures of each tag, and the MAC
+address of the gateway; the GPS coordinates the gateway may send are never
+read.
+
+## Credits
+
+Written from the developer documentation of Ruuvi
+([docs.ruuvi.com](https://docs.ruuvi.com), repository
+[ruuvi/docs](https://github.com/ruuvi/docs)): the local API of the gateway
+and the data formats of the tags. No code of another project is ported; the
+pages used are listed in `THIRD_PARTY_NOTICES.md`. Ruuvi, RuuviTag and Ruuvi
+Gateway are trademarks of Ruuvi Innovations Ltd; this connector is free and
+unofficial.

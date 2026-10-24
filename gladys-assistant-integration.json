@@ -1,177 +1,91 @@
 {
   "manifest_version": 1,
   "type": "device",
-  "name": "Demo Devices Template",
+  "name": "Ruuvi Gateway",
   "description": {
-    "en": "Starter template showing sensors, a switch, a dimmable light and a smart plug.",
-    "fr": "Template de démarrage : capteurs, interrupteur, lampe variable et prise connectée."
+    "en": "Unofficial connector: your RuuviTag sensors, through a Ruuvi Gateway on your network.",
+    "fr": "Connecteur non officiel : vos capteurs RuuviTag, via une Ruuvi Gateway sur votre réseau."
   },
-  "version": "1.0.0",
-  "docker_image": "ghcr.io/gladysassistant/integration-template-js:1.0.0",
+  "version": "0.1.0",
+  "docker_image": "ghcr.io/lm1lc3n7/gladys-ruuvi-gateway:0.1.0",
   "gladys_version": ">=5.1.0",
-  "cover_image": "https://raw.githubusercontent.com/GladysAssistant/integration-template-js/master/cover.png",
-  "categories": ["lighting", "security", "environment"],
-  "transports": ["local", "cloud"],
+  "cover_image": "https://raw.githubusercontent.com/LM1LC3N7/gladys-ruuvi-gateway/main/cover.png",
+  "categories": ["environment"],
+  "transports": ["local"],
   "config_schema": [
     {
       "key": "intro",
       "type": "section",
-      "label": { "en": "Getting started", "fr": "Pour commencer" },
+      "label": { "en": "Ruuvi Gateway in Gladys", "fr": "Ruuvi Gateway dans Gladys" },
       "description": {
-        "en": "The demo weather station reads real data from the free Open-Meteo API: pick the coordinates to observe. No account, no API key.",
-        "fr": "La station météo de démonstration lit de vraies données via l'API gratuite Open-Meteo : choisissez les coordonnées à observer. Pas de compte, pas de clé d'API."
+        "en": "Unofficial connector, not affiliated with Ruuvi. It reads the RuuviTag sensors your Ruuvi Gateway hears, through the local HTTP API of the gateway (polling mode): temperature, humidity, pressure, motion, battery voltage and signal. The gateway listens to the tags over Bluetooth; this integration does not use Bluetooth. On the Access settings page of the gateway, turn on the read-only access with an API key (bearer). Read only: nothing is ever changed on the gateway. Never tested with a real gateway yet.",
+        "fr": "Connecteur non officiel, sans lien avec Ruuvi. Il lit les capteurs RuuviTag qu'entend votre Ruuvi Gateway, par l'API HTTP locale de la passerelle (mode interrogation) : température, humidité, pression, mouvement, tension de la pile et signal. La passerelle écoute les capteurs en Bluetooth ; cette intégration n'utilise pas le Bluetooth. Sur la page Paramètres d'accès de la passerelle, activez l'accès en lecture seule par clé d'API (bearer). Lecture seule : rien n'est jamais modifié sur la passerelle. Jamais testé avec une vraie passerelle pour l'instant."
       },
       "links": [
         {
-          "url": "https://open-meteo.com/en/docs",
-          "label": { "en": "Open-Meteo documentation", "fr": "Documentation Open-Meteo" }
+          "url": "https://github.com/LM1LC3N7/gladys-ruuvi-gateway/blob/main/docs/fr.md",
+          "label": { "en": "Guide (French)", "fr": "Guide (français)" }
+        },
+        {
+          "url": "https://github.com/LM1LC3N7/gladys-ruuvi-gateway/blob/main/docs/en.md",
+          "label": { "en": "Guide (English)", "fr": "Guide (anglais)" }
+        },
+        {
+          "url": "https://docs.ruuvi.com/ruuvi-gateway-firmware/examples/polling-mode",
+          "label": {
+            "en": "Polling mode of the gateway (Ruuvi docs)",
+            "fr": "Mode interrogation de la passerelle (docs Ruuvi)"
+          }
         }
       ]
     },
     {
-      "key": "latitude",
-      "type": "number",
-      "label": { "en": "Latitude", "fr": "Latitude" },
+      "key": "host",
+      "type": "string",
+      "label": { "en": "Address of the gateway", "fr": "Adresse de la passerelle" },
       "description": {
-        "en": "Latitude used for the demo weather sensor.",
-        "fr": "Latitude utilisée par le capteur météo de démonstration."
+        "en": "The IP address or the host name of the Ruuvi Gateway on your local network, with a port if it is not 80. Give it a fixed address in your router.",
+        "fr": "L'adresse IP ou le nom d'hôte de la Ruuvi Gateway sur votre réseau local, avec un port s'il n'est pas 80. Donnez-lui une adresse fixe dans votre box."
       },
-      "placeholder": { "en": "e.g. 48.8566", "fr": "ex. 48.8566" },
-      "required": true,
-      "default": 48.8566,
-      "min": -90,
-      "max": 90
+      "placeholder": { "en": "192.168.1.50", "fr": "192.168.1.50" },
+      "required": false
     },
     {
-      "key": "longitude",
-      "type": "number",
-      "label": { "en": "Longitude", "fr": "Longitude" },
+      "key": "token",
+      "type": "secret",
+      "label": { "en": "Read-only API key", "fr": "Clé d'API en lecture seule" },
       "description": {
-        "en": "Longitude used for the demo weather sensor.",
-        "fr": "Longitude utilisée par le capteur météo de démonstration."
+        "en": "The read-only API key (bearer) set on the Access settings page of the gateway. Kept by Gladys in its database, never shown again; sent only to the gateway, in the Authorization header of each read, never in a URL nor a log. The gateway speaks plain HTTP: the key crosses your local network as is. A refused key is never tried again on its own.",
+        "fr": "La clé d'API en lecture seule (bearer) définie sur la page Paramètres d'accès de la passerelle. Gardée par Gladys dans sa base, jamais réaffichée ; envoyée seulement à la passerelle, dans l'en-tête Authorization de chaque lecture, jamais dans une URL ni un journal. La passerelle parle HTTP en clair : la clé traverse votre réseau local telle quelle. Une clé refusée n'est jamais réessayée d'elle-même."
       },
-      "placeholder": { "en": "e.g. 2.3522", "fr": "ex. 2.3522" },
-      "required": true,
-      "default": 2.3522,
-      "min": -180,
-      "max": 180
+      "required": false
     },
     {
-      "key": "unit",
-      "type": "select",
-      "label": { "en": "Temperature unit", "fr": "Unité de température" },
-      "required": false,
-      "default": "celsius",
-      "options": [
-        { "value": "celsius", "label": { "en": "Celsius", "fr": "Celsius" } },
-        { "value": "fahrenheit", "label": { "en": "Fahrenheit", "fr": "Fahrenheit" } }
-      ]
-    },
-    {
-      "key": "poll_frequency",
+      "key": "poll_interval",
       "type": "number",
-      "label": { "en": "Refresh interval (s)", "fr": "Intervalle de rafraîchissement (s)" },
+      "label": {
+        "en": "Read interval (minutes)",
+        "fr": "Intervalle de lecture (minutes)"
+      },
       "description": {
-        "en": "How often sensors are polled, in seconds (one minute minimum).",
-        "fr": "Fréquence d'interrogation des capteurs, en secondes (une minute minimum)."
+        "en": "Each read sends one request to the gateway for the last frame of every tag. Nothing reads sooner, not even the test button or a restart.",
+        "fr": "Chaque lecture envoie une requête à la passerelle pour la dernière trame de chaque capteur. Rien ne lit plus tôt, ni le bouton de test ni un redémarrage."
       },
       "required": false,
-      "default": 300,
-      "min": 60,
-      "max": 3600
+      "default": 2,
+      "min": 1,
+      "max": 60
     }
   ],
   "actions": [
     {
-      "key": "test_weather",
-      "label": { "en": "Test the weather provider", "fr": "Tester le fournisseur météo" },
-      "timeout_seconds": 30
-    },
-    {
-      "key": "identify",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ]
-    }
-  ],
-  "scene_triggers": [
-    {
-      "key": "motion_detected",
-      "label": { "en": "Motion detected", "fr": "Mouvement détecté" },
+      "key": "test_connection",
+      "timeout_seconds": 60,
+      "label": { "en": "Test the gateway", "fr": "Tester la passerelle" },
       "description": {
-        "en": "A demo motion sensor saw a person or an animal move.",
-        "fr": "Un détecteur de démonstration a vu bouger une personne ou un animal."
-      },
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Sensor", "fr": "Détecteur" }
-        },
-        {
-          "key": "target",
-          "type": "multi_select",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" },
-          "options": [
-            { "value": "person", "label": { "en": "Person", "fr": "Personne" } },
-            { "value": "animal", "label": { "en": "Animal", "fr": "Animal" } }
-          ]
-        }
-      ],
-      "variables": [
-        {
-          "key": "target",
-          "type": "string",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" }
-        }
-      ]
-    }
-  ],
-  "scene_actions": [
-    {
-      "key": "identify_device",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "description": {
-        "en": "Make a device signal itself (the demo light blinks).",
-        "fr": "Fait se signaler un appareil (la lampe de démonstration clignote)."
-      },
-      "timeout_seconds": 15,
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ],
-      "outputs": [
-        {
-          "key": "signalled",
-          "type": "boolean",
-          "label": { "en": "Device signalled", "fr": "Appareil signalé" }
-        }
-      ]
-    }
-  ],
-  "widgets": [
-    {
-      "key": "demo_status",
-      "label": { "en": "Demo status", "fr": "État de la démo" },
-      "description": {
-        "en": "Live temperature and plug power, plug connection and observed location.",
-        "fr": "Température et puissance en direct, connexion de la prise, position observée."
-      },
-      "icon": "activity",
-      "action_timeout_seconds": 15
+        "en": "Reads what is due (a refused key is tried once then, once the interval has passed) and shows the last values of each tag and when the next read can happen.",
+        "fr": "Lit ce qui est dû (une clé refusée est alors essayée une fois, l'intervalle écoulé) et affiche les dernières valeurs de chaque capteur et l'heure de la prochaine lecture possible."
+      }
     }
   ]
 }

@@ -12,44 +12,29 @@ the notes of the version's GitHub Release.
 
 ### Added
 
-- A working example of scene triggers, scene actions and dashboard widgets
-  (Gladys 5.1.0 or later).
-- `CHANGELOG.md`, rolled by the Release workflow.
-- A GitHub Release for every version, with its changelog section as notes: the
-  Gladys Supervision page links each version to the repository's releases.
-- CI runs the tests on Node 22 and 24, and builds the Docker image.
-- Dependabot keeps the npm dependencies and the GitHub Actions up to date.
-- `SECURITY.md` (how to report a vulnerability) and `CLAUDE.md` (project rules
-  for contributors and coding assistants).
-- Manifest tests: `version` matches `package.json`, `docker_image` is tagged
-  with it, descriptions hold 10 to 100 characters, placeholders are
-  multi-language objects.
-- The latitude and longitude fields show an example value as placeholder.
-
-### Changed
-
-- Node.js 22 or later is required (Node 20 is end-of-life).
-- Integration SDK 0.15.0. The tests now run against the fake Gladys of the
-  SDK, which refuses the payloads Gladys refuses.
-- The refresh interval is one minute minimum, the fastest Gladys polls a
-  device. The plug's power is only sent when it changes, and every 30
-  minutes otherwise.
-
-### Fixed
-
-- Gladys refused the devices of the Discovery tab: the weather station and
-  the plug declared their poll frequency in seconds instead of one of the
-  values Gladys accepts, and were never polled. They now poll every minute,
-  and the readings follow the refresh interval of the configuration.
-
-- The release commit no longer fails `npm run format:check`: the Release
-  workflow updates the manifest `version` and `docker_image` in place instead
-  of re-printing the whole file with `jq`.
-- The integration can write to `/data`: the image creates the directory owned
-  by the `node` user, a new Docker volume was owned by root.
-- A sub-container running the integration's own image follows it to the new
-  tag at each release, as well as in the manifest of the build summary: it kept
-  the previous tag, which may not exist on the registry. Sub-containers on a
-  third-party image (a broker, a database...) keep theirs.
-
-[Unreleased]: https://github.com/GladysAssistant/integration-template-js/commits/main
+- Your RuuviTag sensors in Gladys, read only, through the local HTTP API of a
+  Ruuvi Gateway (polling mode, `GET /history`, read-only API key): no cloud,
+  no Bluetooth in Gladys. Fifty tags at most.
+- One device per tag (its MAC address as the id): temperature, humidity,
+  pressure, motion (the movement counter of the tag moved since its previous
+  measurement), battery voltage and signal, in the units Gladys lists (°C,
+  %, hPa).
+- The frames are decoded by the integration after the data formats published
+  by Ruuvi: 5 (RAWv2), C5 (Cut-RAWv2) and 3 (RAWv1), checked against the test
+  vectors of the docs; "not available" values are left out; the formats of
+  Ruuvi Air (6, E1), 8 and URL are counted in the status, not decoded.
+- Each measurement is handed to Gladys once, told apart by its sequence
+  number, also across a restart: a tag that stops measuring is never shown
+  alive, even while the gateway still hears its last frame. Its age is
+  counted on the clock of the gateway; older than an hour, it is never sent.
+- Read every 2 minutes by default, never faster: not by the test button, a
+  reconnection, a saved configuration, the Discovery tab nor a restart (the
+  instant of the last request is kept under `/data`, written at most once
+  per minute). At most 250 values a minute are sent to Gladys.
+- A refused key stops the reads for good, also after a restart, until you
+  change the address or the key or press the test button. A 429 or 5xx
+  pauses the reads (Retry-After, else 5 minutes doubling, between 1 minute
+  and 6 hours), also across a restart. The key is never written under
+  `/data`, in the logs nor in a status.
+- A test button that shows the last values of each tag and when the next
+  read can happen.
