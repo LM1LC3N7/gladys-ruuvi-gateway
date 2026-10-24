@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-24
+
 ### Added
 
 - Your RuuviTag sensors in Gladys, read only, through the local HTTP API of a
@@ -43,3 +45,6 @@ the notes of the version's GitHub Release.
   measurement changes between two reads.
 - A value that waited (full budget, Gladys unreachable) is dated, or dropped
   past an hour, when it is finally sent.
+
+[Unreleased]: https://github.com/LM1LC3N7/gladys-ruuvi-gateway/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/LM1LC3N7/gladys-ruuvi-gateway/releases/tag/v0.1.1
