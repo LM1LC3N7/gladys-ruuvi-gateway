@@ -1,6 +1,6 @@
 {
   "name": "gladys-ruuvi-gateway",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "Ruuvi Gateway for Gladys Assistant: the RuuviTag sensors your Ruuvi Gateway hears (temperature, humidity, pressure, motion, battery), read through its local HTTP API, read only.",
   "type": "module",
