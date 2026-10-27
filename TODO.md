@@ -41,6 +41,10 @@
 
 ## Decisions
 
+- **SDK `^0.16.0`** (2026-10-27, migration wave 3): 0.16.0 is on npm since
+  2026-10-25 (a stale npm cache said otherwise); it adds the ai, tts and music
+  types; no effect here (`poll_frequency` unused). `keywords`, `countries`
+  and `gladys_version >= 5.3.0` wait until Gladys 5.3 is widespread.
 - **Version 0.1.0 set by hand** in `package.json`, `package-lock.json`, the
   manifest and the `docker_image` tag
   (`ghcr.io/lm1lc3n7/gladys-ruuvi-gateway:0.1.0`); the first patch release
